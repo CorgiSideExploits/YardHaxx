@@ -1,0 +1,741 @@
+local YardHaxxAPI = {}
+
+local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Teams = game:GetService("Teams")
+
+local LocalPlayer = Players.LocalPlayer
+
+
+-- SharedTables
+local YardHaxxAPI_Bools = {
+	KillAura = false;
+	Noclip = false;
+	ESP = false;
+}
+
+local YardHaxxAPI_Numbers = {
+	WS = 18; -- Default
+	JP = 50;
+}
+
+local YardHaxxAPI_Storage = {
+	PreviousCameraPosition = nil;
+	Connections = {};
+	Storage = {
+		AntiArrest = false;
+		AutoRespawn = false;
+	};
+	Saved = {
+		AutoRespawn = nil;
+	};
+}
+
+-- Local Functions
+local PerformAction = function(state:string, plrstate)
+
+	local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
+	if char then
+		if not plrstate then
+			if state:lower() == "sit" or state:lower() == "seat" then
+				char['Humanoid'].Sit = true
+			elseif state:lower() == "unseat" or state:lower() == "unsit" then
+				for i = 1, 10 do
+					RunService.Heartbeat:Wait()
+
+					char['Humanoid'].Sit = false
+
+					RunService.RenderStepped:Wait()
+
+					char['Humanoid'].Sit = false
+
+					RunService.Stepped:Wait()
+
+					char['Humanoid'].Sit = false
+				end
+			elseif state:lower() == "unequip" then
+				LocalPlayer.Character:FindFirstChild("Humanoid"):UnequipTools()
+			elseif state:lower() == "die" or state:lower() == "kill" then
+				LocalPlayer.Character:FindFirstChild("Humanoid").Health = 0
+			elseif state:lower() == "died" or state:lower() == "ondeath" then
+				LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid"):ChangeState(Enum.HumanoidStateType.Dead)
+			elseif state:lower() == "jump" or state:lower() == "fakejump" then
+				LocalPlayer.Character:FindFirstChild("Humanoid"):ChangeState(Enum.HumanoidStateType.Jumping)
+			end
+		elseif plrstate then
+			if state:lower() == "setspeed" or state:lower() == "speed" then
+				char['Humanoid'].WalkSpeed = plrstate
+			elseif state:lower() == "setjump" or state:lower() == "setjp" then
+				char['Humanoid'].JumpPower = plrstate
+			elseif state:lower() == "setstate" then
+				LocalPlayer.Character:FindFirstChildOfClass("Humanoid"):ChangeState(plrstate)
+			elseif state:lower() == "equip" then
+				LocalPlayer.Character:FindFirstChild("Humanoid"):EquipTool(plrstate)
+			end
+		end
+	end
+end
+
+local WaitForTask = function(source,args,Interval)
+	local interval = Interval or 5
+	local timeout = tick() + interval
+	repeat 
+		RunService.Stepped:Wait()
+	until
+	source:FindFirstChild(args) or tick() - timeout >= 0
+	timeout = nil
+
+	if source:FindFirstChild(args) then
+		return source:FindFirstChild(args)
+	else
+		return nil
+	end
+end
+
+local SaveCameraPosition = function()
+	YardHaxxAPI_Storage.PreviousCameraPosition = workspace.Camera.CFrame
+end
+
+local LoadCameraPosition = function()
+	RunService.RenderStepped:Wait()
+	workspace['Camera'].CFrame = YardHaxxAPI_Storage.PreviousCameraPosition or workspace['Camera'].CFrame
+end
+
+-- Global Functions (Can be called through client and server scripts)
+function YardHaxxAPI.ObtainWeapon(gunGet)
+	local gun = gunGet;
+
+	local SP = {} -- Positions to save
+	local PG = { -- Possible Guns to Spawn
+		["AK-47"] = true,
+		["Remington 870"] = true,
+		["M9"] = true,
+		["M4A1"] = true,
+		["All"] = true
+	}
+
+	local SetCFrame = function(x : CFrame)
+		LocalPlayer.Character['HumanoidRootPart'].CFrame = x;
+	end
+
+	local GrabItem = function(itemorigin, item)
+		local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart");
+		local timeout = tick() + 5
+
+		if hrp then 
+			SP.GetGunOldPos = not SP.GetGunOldPos and hrp.CFrame or SP.GetGunOldPos;
+		end
+
+		local ItemToGrab = itemorigin:FindFirstChild(item)
+		local IP = ItemToGrab['ITEMPICKUP']
+		local IPPos= IP.Position
+
+		if hrp then 
+			SetCFrame(CFrame.new(IPPos));
+		end; 
+
+		repeat task.wait()
+
+			pcall(function()
+				LocalPlayer.Character:FindFirstChildOfClass("Humanoid").Sit = false;
+				SetCFrame(CFrame.new(IP))
+			end); 
+			task.spawn(function()
+				game:GetService("Workspace").Remote.ItemHandler:InvokeServer(IP)
+			end)
+
+		until LocalPlayer.Backpack:FindFirstChild(item) or LocalPlayer.Character:FindFirstChild(item) or tick() - timeout >=0
+
+		pcall(function() 
+			SetCFrame(SP.GetGunOldPos);
+		end) 
+
+
+		SP.GetGunOldPos = nil
+	end
+
+	local GiveItem = function(gungiver, gun)
+		if gungiver and gungiver == "old" then
+			game:GetService("Workspace").Remote.ItemHandler:InvokeServer(gun)
+
+			return
+		end
+
+		for _, givers in pairs(workspace.Prison_ITEMS:GetChildren()) do
+			if givers:FindFirstChild(gun) then
+				GrabItem(gungiver, gun)
+				break
+			end
+
+			return
+		end
+
+		if gungiver then
+			workspace.Remote.ItemHandler:InvokeServer({Position = LocalPlayer.Character.Head.Position, Parent = gungiver:FindFirstChild(gun)})
+		else
+			workspace.Remote.ItemHandler:InvokeServer({Position = LocalPlayer.Character.Head.Position, Parent = workspace.Prison_ITEMS.giver:FindFirstChild(gun) or workspace.Prison_ITEMS.single:FindFirstChild(gun)})
+		end
+	end
+
+	local SpawnGun = function(guntogive : string)
+		if guntogive ~= "All" then
+			workspace.Remote.ItemHandler:InvokeServer({
+				Position = LocalPlayer.Character.Head.Position,
+				Parent = workspace.Prison_ITEMS.giver:FindFirstChild(guntogive)
+					or workspace.Prison_ITEMS.single:FindFirstChild(guntogive)
+			})
+		else
+			for gunName, _ in pairs(PG) do
+				if gunName ~= "All" then
+					workspace.Remote.ItemHandler:InvokeServer({
+						Position = LocalPlayer.Character.Head.Position,
+						Parent = workspace.Prison_ITEMS.giver:FindFirstChild(gunName)
+							or workspace.Prison_ITEMS.single:FindFirstChild(gunName)
+					})
+				end
+			end
+		end
+	end
+
+	task.spawn(function()
+		local guntask = function()
+			if PG[gun] and gun ~= "All" then
+				SpawnGun(gun);
+				YardHaxxAPI.Notify("Successfully Gave You "..gun..".");
+			else
+				SpawnGun("All");
+				YardHaxxAPI.Notify("Successfully Gave You All Guns.");
+			end
+		end
+
+		guntask()
+	end)
+end
+
+function YardHaxxAPI.ToggleAura(toggle:boolean)
+	YardHaxxAPI_Bools.KillAura = toggle
+end
+
+function YardHaxxAPI.RegisterUI(Title, Message, BC, BT, NWC)
+	local Title                  = Title;
+	local AboutMessage           = Message;
+	local BackgroundColor        = BC;
+	local BackgroundTransparency = BT;
+	local NotifyWhenChanged = NWC
+
+
+	-- Variables (I recommend you not change this stuff tehee)
+	local Players     = game:GetService("Players");
+	local LocalPlayer = Players.LocalPlayer;
+	local PUI         = LocalPlayer.PlayerGui;
+
+	local Home         = PUI['Home'];
+	local hud          = Home['hud'];
+	local Topbar       = hud['Topbar'];
+	local Pulldownmenu = Topbar['Pulldownmenu'];
+	local titleBar     = Topbar['titleBar'];
+	local Frame        = Pulldownmenu['Frame']
+	local Desc         = Frame['Description']
+
+	task.spawn(function()
+		if NotifyWhenChanged then
+			game:GetService("StarterGui"):SetCore("SendNotification",{
+				Title = ("Successfully Changed Title Bar Text To: "..Title);
+				Text = ("Successfully Changed About Message To: "..AboutMessage);
+			})
+		end
+
+		local titletask = function()
+			task.wait()
+
+			titleBar.Title.Text             = Title;
+			Desc.Text                       = AboutMessage;
+			titleBar.BackgroundColor3       = BackgroundColor;
+			titleBar.BackgroundTransparency = BackgroundTransparency
+		end
+
+		pcall(function() titletask() end)
+
+		titleBar.Title:GetPropertyChangedSignal("Text"):Connect(function()
+			pcall(function() titletask() end)
+		end)
+	end)
+end
+
+function YardHaxxAPI.Notify(text:string,dur:number)
+	StarterGui:SetCore("SendNotification",{
+		Title = "YardHaxx API";
+		Text = text;
+		Duration = dur or 5;
+	})
+end
+
+function YardHaxxAPI.SetTeam(team:string)
+	local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
+	if char then
+
+		local savedPosition = char['HumanoidRootPart'].CFrame
+		YardHaxxAPI_Storage.Saved.AutoRespawn = savedPosition
+		SaveCameraPosition()
+
+		if team:lower() == "criminal" or team:lower() == "crim" then
+			if LocalPlayer.TeamColor.Name == "Medium stone grey" then
+				workspace.Remote['TeamEvent']:FireServer("Bright orange")
+			end
+			workspace["Criminals Spawn"].SpawnLocation.CanCollide = false
+			repeat
+				pcall(function()
+					workspace["Criminals Spawn"].SpawnLocation.CFrame = LocalPlayer.Character:FindFirstChild("HumanoidRootPart").CFrame
+				end)
+
+				RunService.Stepped:Wait()
+			until LocalPlayer.TeamColor == BrickColor.new("Really red")
+			return
+
+		elseif team:lower() == "guard" or team:lower() == "cop" then
+			workspace.Remote['TeamEvent']:FireServer("Bright blue")
+			if #Teams.Guards:GetPlays() > 7 then
+				YardHaxxAPI.Notify("Guards team is full.")
+				return
+			end
+		elseif team:lower() == "inmate" or team:lower() == "prisoner" then
+			workspace.Remote['TeamEvent']:FireServer("Bright orange")
+		end
+		LocalPlayer.CharacterAdded:Wait();
+		WaitForTask(char, "HumanoidRootPart", 5)
+		LoadCameraPosition()
+	end
+end
+
+YardHaxxAPI_Storage.Saved.AutoRespawn = false
+local diedevent
+local char0 = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local function ondiedevent()
+	coroutine.wrap(function()
+		diedevent:Disconnect();
+		SaveCameraPosition()
+		YardHaxxAPI_Storage.Saved.AutoRespawn = char0:WaitForChild("HumanoidRootPart", 1) and LocalPlayer.Character:FindFirstChild("HumanoidRootPart").CFrame
+	end)()
+	if YardHaxxAPI_Storage.Storage.AutoRespawn then
+		local playerTeam = LocalPlayer.TeamColor
+		if playerTeam == BrickColor.new("Really red") then
+			if #Teams.Guards:GetPlayers() < 8 then
+				workspace.Remote['TeamEvent']:FireServer("Bright blue")
+			else
+				workspace.Remote['TeamEvent']:FireServer("Bright orange")
+			end
+
+			workspace['Criminals Spawn'].SpawnLocation.CanCollide = false
+			workspace['Criminals Spawn'].SpawnLocation.CFrame = LocalPlayer.Character:FindFirstChild("HumanoidRootPart").CFrame
+			LocalPlayer.CharacterAdded:Wait()
+			repeat 
+				task.wait()
+				pcall(function()
+					workspace['Criminals Spawn'].SpawnLocation.CFrame = LocalPlayer.Character:FindFirstChild("HumanoidRootPart").CFrame
+				end)
+			until
+			LocalPlayer.TeamColor == BrickColor.new("Really red");
+		elseif playerTeam == BrickColor.new("Bright blue") then
+			if #Teams.Guards:GetPlayers() == 8 then
+				workspace.Remote['TeamEvent']:FireServer("Bright orange")
+			end;
+
+			workspace.Remote['TeamEvent']:FireServer("Bright blue")
+		elseif playerTeam == BrickColor.new("Bright orange") then
+			workspace.Remote['TeamEvent']:FireServer("Bright orange")
+		else
+			workspace.Remote['TeamEvent']:FireServer("Medium stone grey")
+		end
+	end
+end
+
+local function AddCharacterTask()
+	diedevent:Disconnect()
+	local Humanoid = char0:WaitForChild("Humanoid", 1)
+	if Humanoid then
+		diedevent = Humanoid.Died:Connect(ondiedevent)
+		if YardHaxxAPI_Storage.Connections['Humanation'] then
+			YardHaxxAPI_Storage.Connections['Humanation']:Disconnect();
+			YardHaxxAPI_Storage.Connections['Humanation'] = nil
+		end
+
+		YardHaxxAPI_Storage.Connections['Humanation'] = Humanoid.AnimationPlayed:Connect(function(description)
+			if YardHaxxAPI_Storage.Storage.AntiArrest and description.Animation.AnimationId == "rbxassetid://287112271" then
+				description:Stop();
+				description:Destroy()
+
+				task.delay(4.95, function()
+					local hrp, hascriminalrecord = LocalPlayer.Character:FindFirstChild("HumanoidRootPart").CFrame, LocalPlayer.TeamColor.Name == "Really red" or nil;
+					YardHaxxAPI_Storage.Saved.AutoRespawn = hrp;
+					SaveCameraPosition()
+
+					LocalPlayer.CharacterAdded:Wait();
+					WaitForTask(LocalPlayer.Character, "HumanoidRootPart", 1).CFrame = hrp;
+					LoadCameraPosition()
+
+					if hascriminalrecord then
+						YardHaxxAPI.SetTeam("crim")
+					end
+				end)
+
+				task.delay(0, function()
+					PerformAction("speed", YardHaxxAPI_Numbers.WS);
+					task.wait(0.3);
+					PerformAction("jump", YardHaxxAPI_Numbers.JP)
+				end)
+			end
+		end)
+	end
+end
+
+local function OnCharacterAdded()
+	char0 = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+	coroutine.wrap(AddCharacterTask)()
+	if YardHaxxAPI_Storage.Saved.AutoRespawn and YardHaxxAPI_Storage.Storage.AutoRespawn then
+		local hrp = char0:WaitForChild("HumanoidRootPart", 1)
+
+		if hrp then
+			hrp.CFrame = YardHaxxAPI_Storage.Saved.AutoRespawn;
+			LoadCameraPosition();
+			hrp.CFrame = YardHaxxAPI_Storage.Saved.AutoRespawn
+
+			task.spawn(function()
+				for i=1,3 do
+					task.wait();
+
+					hrp.CFrame = YardHaxxAPI_Storage.Saved.AutoRespawn
+				end
+			end)
+
+			if wait() and not hrp:FindFirstChildWhichIsA("ForceField") then
+				for i=1,4 do
+					hrp.CFrame = YardHaxxAPI_Storage.Saved.AutoRespawn;
+					WaitForTask(LocalPlayer.Character, "HumanoidRootPart", 1).CFrame = YardHaxxAPI_Storage.Saved.AutoRespawn
+				end;
+
+				char0:WaitForChild("HumanoidRootPart", 1).CFrame = YardHaxxAPI_Storage.Saved.AutoRespawn
+			end
+		end
+	end
+
+	char0:WaitForChild("Humanoid", 1):SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+	char0:WaitForChild("Humanoid", 1):SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+end
+
+diedevent = char0:WaitForChild("Humanoid").Died:Connect(ondiedevent)
+YardHaxxAPI_Storage.Connections['CharacterAdded'] = LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)
+
+function YardHaxxAPI.VarietyKill(plrs, exclude)
+	local gun = LocalPlayer.Backpack:FindFirstChild("AK-47") or LocalPlayer.Character:FindFirstChild("AK-47")
+
+	if not gun and LocalPlayer.TeamColor ~= BrickColor.new("Bright blue") then
+		YardHaxxAPI.ObtainWeapon("AK-47")
+		task.wait()
+		gun = LocalPlayer.Backpack:FindFirstChild("AK-47") or LocalPlayer.Character:FindFirstChild("AK-47")
+	elseif LocalPlayer.TeamColor == BrickColor.new("Bright blue") then
+		gun = LocalPlayer.Backpack:FindFirstChild("M9") or LocalPlayer.Character:FindFirstChild("M9")
+	end
+
+	local nkill = false
+	local gotPlayers = false
+	local ShootEvents = {}
+
+	for _, x in pairs(plrs:GetPlayers()) do
+		if x ~= LocalPlayer and x ~= exclude then
+			local char = x.Character
+			local hum = char and char:FindFirstChild("Humanoid")
+			if char and hum and hum.Health > 0 and not char:FindFirstChildWhichIsA("ForceField") then
+				gotPlayers = true
+
+				if x.TeamColor == LocalPlayer.TeamColor then
+					if x.TeamColor == BrickColor.new("Bright orange") then
+						YardHaxxAPI.SetTeam("criminal")
+					elseif x.TeamColor == BrickColor.new("Really red") or x.TeamColor == BrickColor.new("Bright blue") then
+						nkill = true
+					end
+				end
+
+				for i = 1, 10 do
+					ShootEvents[#ShootEvents + 1] = {
+						Hit = char:FindFirstChildWhichIsA("Part");
+						Cframe = CFrame.new();
+						RayObject = Ray.new(Vector3.new(), Vector3.new());
+						Distance = 0;
+					}
+				end
+			elseif char and char:FindFirstChildWhichIsA("ForceField") then
+				YardHaxxAPI.Notify("Could not kill " .. x.Name .. " because they have a forcefield.", 5)
+			end
+		end
+	end
+
+	if not gotPlayers then
+		return
+	end
+
+	task.spawn(function()
+		for i = 1, 20 do
+			ReplicatedStorage.ReloadEvent:FireServer(gun)
+			task.wait(0.1)
+		end
+	end)
+
+	if nkill then
+		YardHaxxAPI_Storage.Saved.AutoRespawn = LocalPlayer.Character:FindFirstChild("HumanoidRootPart").CFrame
+		SaveCameraPosition()
+		YardHaxxAPI.SetTeam("neutral")
+		ReplicatedStorage.ShootEvent:FireServer(ShootEvents, gun)
+		task.wait(0.06)
+		YardHaxxAPI.SetTeam("inmate")
+	else
+		ReplicatedStorage.ShootEvent:FireServer(ShootEvents, gun)
+	end
+end
+
+function YardHaxxAPI.SetNoclip(toggle:boolean)
+	YardHaxxAPI_Bools.Noclip = toggle
+end
+
+function YardHaxxAPI.SetSpeed(ws:number)
+	YardHaxxAPI_Numbers.WS = ws
+end
+
+function YardHaxxAPI.SetJump(jp:number)
+	YardHaxxAPI_Numbers.JP = jp
+end
+
+local SetHRPCframe = function(CFrame)
+	local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+	
+	if char then
+		char['HumanoidRootPart'].CFrame = CFrame
+	end
+end
+
+function YardHaxxAPI.Teleport(teleport:string)
+	local Teleports = {
+		nspawn = CFrame.new(879, 28, 2349);
+		cells = CFrame.new(918.9735107421875, 99.98998260498047, 2451.423583984375);
+		nexus = CFrame.new(877.929688, 99.9899826, 2373.57031, 0.989495575, 1.64841456e-08, 0.144563332, -3.13438235e-08, 1, 1.00512544e-07, -0.144563332, -1.0398788e-07, 0.989495575);
+		armory = CFrame.new(836.130432, 99.9899826, 2284.55908, 0.999849498, 5.64007507e-08, -0.0173475463, -5.636889e-08, 1, 2.3254485e-09, 0.0173475463, -1.34723666e-09, 0.999849498);
+		yard = CFrame.new(787.560425, 97.9999237, 2468.32056, -0.999741256, -7.32754017e-08, -0.0227459427, -7.49895506e-08, 1, 7.45077955e-08, 0.0227459427, 7.6194226e-08, -0.999741256);
+		crimbase = CFrame.new(-864.760071, 94.4760284, 2085.87671, 0.999284029, 1.78674284e-08, 0.0378339142, -1.85715123e-08, 1, 1.82584365e-08, -0.0378339142, -1.89479969e-08, 0.999284029);
+		cafe = CFrame.new(884.492798, 99.9899368, 2293.54907, -0.0628612712, -2.14097344e-08, -0.998022258, -9.52544568e-08, 1, -1.54524784e-08, 0.998022258, 9.40947018e-08, -0.0628612712);
+		kitchen = CFrame.new(936.633118, 99.9899368, 2224.77148, -0.00265917974, -9.30829671e-08, 0.999996483, -3.28682326e-08, 1, 9.29958901e-08, -0.999996483, -3.26208252e-08, -0.00265917974);
+		roof = CFrame.new(918.694092, 139.709427, 2266.60986, -0.998788536, -7.55880691e-08, -0.0492084064, -7.8453354e-08, 1, 5.62961198e-08, 0.0492084064, 6.00884817e-08, -0.998788536);
+		vents = CFrame.new(933.55376574342, 121.534234671875, 2232.7952174975);
+		office = CFrame.new(706.1928465, 103.14982749, 2344.3957382525);
+		ytower = CFrame.new(786.731873, 125.039917, 2587.79834, -0.0578307845, 8.82393678e-08, 0.998326421, 6.09781523e-08, 1, -8.48549675e-08, -0.998326421, 5.59688687e-08, -0.0578307845);
+		gtower = CFrame.new(505.551605, 125.039917, 2127.41138, -0.99910152, 5.44945458e-08, 0.0423811078, 5.36830491e-08, 1, -2.02856469e-08, -0.0423811078, -1.79922726e-08, -0.99910152);
+		garage = CFrame.new(618.705566, 98.039917, 2469.14136, 0.997341573, 1.85835844e-08, -0.0728682056, -1.79448154e-08, 1, 9.42077172e-09, 0.0728682056, -8.0881204e-09, 0.997341573);
+		sewers = CFrame.new(917.123657, 78.6990509, 2297.05298, -0.999281704, -9.98203404e-08, -0.0378962979, -1.01324503e-07, 1, 3.77708638e-08, 0.0378962979, 4.15835579e-08, -0.999281704);
+		neighborhood = CFrame.new(-281.254669, 54.1751289, 2484.75513, 0.0408788249, 3.26279768e-08, 0.999164104, -3.88249717e-08, 1, -3.10668256e-08, -0.999164104, -3.75225433e-08, 0.0408788249);
+		gas = CFrame.new(-497.284821, 54.3937759, 1686.3175, 0.585129559, -4.33374865e-08, -0.810939848, 5.33533938e-13, 1, -5.34406759e-08, 0.810939848, 3.12692876e-08, 0.585129559);
+		deadend = CFrame.new(-979.852478, 54.1750259, 1382.78967, 0.0152699631, 8.88235174e-09, 0.999883413, 6.75286884e-08, 1, -9.9146682e-09, -0.999883413, 6.76722109e-08, 0.0152699631);
+		store = CFrame.new(455.089508, 11.4253607, 1222.89746, 0.99995482, -3.92535604e-09, 0.00950394664, 2.84450263e-09, 1, 1.1374032e-07, -0.00950394664, -1.13708147e-07, 0.99995482);
+		roadend = CFrame.new(1060.81995, 67.5668106, 1847.08923, 0.0752086118, -1.01192255e-08, -0.997167826, 4.30985886e-10, 1, -1.01154605e-08, 0.997167826, 3.31004502e-10, 0.0752086118);
+		trapbuilding = CFrame.new(-306.715485, 84.2401199, 1984.13367, -0.802221119, 5.70582088e-08, -0.597027004, 4.81801123e-08, 1, 3.08312771e-08, 0.597027004, -4.0313255e-09, -0.802221119);
+		mansion = CFrame.new(-315.790436, 64.5724411, 1840.83521, 0.80697298, -4.47871713e-08, 0.590588331, 1.14004006e-08, 1, 6.02574701e-08, -0.590588331, -4.18932053e-08, 0.80697298);
+		trapbase = CFrame.new(-943.973145, 94.1287613, 1919.73694, 0.025614135, -1.48015129e-08, 0.999671876, 1.00375175e-07, 1, 1.22345032e-08, -0.999671876, 1.00028863e-07, 0.025614135);
+		buildingroof = CFrame.new(-317.689331, 118.838821, 2009.28186, 0.749499857, 2.48145682e-09, 0.662004471, 3.51757373e-10, 1, -4.14664703e-09, -0.662004471, 3.34077632e-09, 0.749499857);
+	};
+	
+	if teleport:lower() == "nexus" then
+		SetHRPCframe(Teleports.nexus)
+	elseif teleport:lower() == "criminal base" or teleport:lower() == "crimbase" then
+		SetHRPCframe(Teleports.crimbase)
+	elseif teleport:lower() == "yard" then
+		SetHRPCframe(Teleports.yard)
+	elseif teleport:lower() == "neigh" then
+		SetHRPCframe(Teleports.neighborhood)
+	elseif teleport:lower() == "mansion" then
+		SetHRPCframe(Teleports.mansion)
+	elseif teleport:lower() == "gas" then
+		SetHRPCframe(Teleports.gas)
+	end
+end
+
+function YardHaxxAPI.SetAutoRespawn(toggle:boolean)
+	YardHaxxAPI_Storage.Storage.AutoRespawn = toggle
+end
+
+function YardHaxxAPI.SpawnBuildingTools()
+	local hammer = Instance.new("HopperBin", LocalPlayer.Backpack)
+	local gametool = Instance.new("HopperBin", LocalPlayer.Backpack)
+	local scriptt = Instance.new("HopperBin", LocalPlayer.Backpack)
+	local grab = Instance.new("HopperBin", LocalPlayer.Backpack)
+	local clonee = Instance.new("HopperBin", LocalPlayer.Backpack)
+	hammer.BinType = "Hammer"
+	gametool.BinType = "GameTool"
+	scriptt.BinType = "Script"
+	grab.BinType = "Grab"
+	clonee.BinType = "Clone"
+end
+
+function YardHaxxAPI.ToggleDoors(toggle:boolean)
+	if toggle then
+		local doors = ReplicatedStorage:FindFirstChild("Doors")
+		if doors then
+			doors.Parent = workspace
+		else
+			YardHaxxAPI.Notify("Doors already exists!")
+		end
+	else
+		local doors = workspace:FindFirstChild("Doors")
+		if doors then
+			doors.Parent = ReplicatedStorage
+		else
+			YardHaxxAPI.Notify("Doors already destroyed!")
+		end
+	end
+end
+
+function YardHaxxAPI.SpawnNeonSword()
+	local rainbow_sword = Instance.new("Tool")
+	rainbow_sword.Grip = CFrame.fromMatrix(Vector3.new(-1.399998664855957, 0.1999998539686203, -5.881091169612773e-08), Vector3.new(-5.212530643119821e-16, -1.1924880638503055e-08, 1), Vector3.new(1, -4.371138828673793e-08, 0), Vector3.new(4.371138828673793e-08, 1, 1.1924880638503055e-08))
+	rainbow_sword.GripForward = Vector3.new(-4.371138828673793e-08, -1, -1.1924880638503055e-08)
+	rainbow_sword.GripPos = Vector3.new(-1.399998664855957, 0.1999998539686203, -5.881091169612773e-08)
+	rainbow_sword.GripRight = Vector3.new(-5.212530643119821e-16, -1.1924880638503055e-08, 1)
+	rainbow_sword.GripUp = Vector3.new(1, -4.371138828673793e-08, 0)
+	rainbow_sword.WorldPivot = CFrame.fromMatrix(Vector3.new(64.5, 0.5000039935112, -12.125), Vector3.new(1, 0, 0), Vector3.new(0, 1, 0), Vector3.new(0, 0, 1))
+	rainbow_sword.Name = "Rainbow Sword"
+	rainbow_sword.Parent = game.Players.LocalPlayer.Backpack
+
+	local handle = Instance.new("Part")
+	handle.BottomSurface = Enum.SurfaceType.Smooth
+	handle.BrickColor = BrickColor.new(0.06666667014360428, 0.06666667014360428, 0.06666667014360428)
+	handle.CFrame = CFrame.fromMatrix(Vector3.new(63.875, 0.5000039935112, -12.125), Vector3.new(1, 0, 0), Vector3.new(0, 1, 0), Vector3.new(0, 0, 1))
+	handle.Color = Color3.new(0.0666667, 0.0666667, 0.0666667)
+	handle.Material = Enum.Material.Neon
+	handle.Size = Vector3.new(3.625, 0.75, 0.75)
+	handle.TopSurface = Enum.SurfaceType.Smooth
+	handle.Name = "Handle"
+	handle.Parent = rainbow_sword
+
+	local sounds = Instance.new("Folder")
+	sounds.Name = "Sounds"
+	sounds.Parent = rainbow_sword
+
+	local slash = Instance.new("Sound")
+	slash.SoundId = "rbxassetid://88633606"
+	slash.Volume = 1
+	slash.Name = "Slash"
+	slash.Parent = sounds
+
+	local anims = Instance.new("Folder")
+	anims.Name = "Anims"
+	anims.Parent = handle
+
+	local swing = Instance.new("Animation")
+	swing.AnimationId = "rbxassetid://218504594"
+	swing.Name = "Swing"
+	swing.Parent = anims
+
+	local AnimTrack = game.Players.LocalPlayer.Character.Humanoid:LoadAnimation(swing)
+
+
+	rainbow_sword.Activated:Connect(function()local a=game.Players.LocalPlayer local b="74894663"local c=Instance.new("Animation")c.AnimationId="rbxassetid://218504594"..b local a=a.Character.Humanoid:LoadAnimation(c)a:Play()a:AdjustSpeed(2)local c=Instance.new("Sound")c.Parent=handle c.MaxDistance=math.huge c.SoundId="rbxassetid://88633606"c.Volume=2 wait()c:Play()for a,b in pairs(game.Players:GetChildren())do if b.Name~=game.Players.LocalPlayer.Name then for a=1,10 do game.ReplicatedStorage.meleeEvent:FireServer(b)c:Destroy()end end end end)
+
+	rainbow_sword.Activated:Connect(function()
+		AnimTrack:Play()
+		slash:Play()
+	end)
+
+	task.spawn(function()
+		local speed = 1
+		local hue = 0
+
+		while true do
+			handle.Color = Color3.fromHSV(hue, 1, 1)
+			hue += 0.01 * speed
+
+			if hue > 1 then
+				hue -= 1
+			end
+
+			task.wait(0.03)
+		end
+	end)
+end
+
+function YardHaxxAPI.SkidFlingAll()
+	loadstring(game:HttpGet("https://raw.githubusercontent.com/CorgiSideExploits/OrionLib/refs/heads/main/SkidFling", true))()
+end
+
+function YardHaxxAPI.ToggleESP(toggle:boolean)
+	YardHaxxAPI_Bools.ESP = toggle
+end
+
+-- Tasks
+task.spawn(function()
+	RunService.RenderStepped:Connect(function()
+		if YardHaxxAPI_Bools['KillAura'] then
+			for i,x in pairs(Players:GetPlayers()) do
+				if x ~= LocalPlayer then
+					ReplicatedStorage['meleeEvent']:FireServer(x)
+				end
+			end
+		end
+
+		local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
+		if char then
+
+			task.spawn(function()
+				for i,x in pairs(char:GetDescendants()) do
+					if x:IsA("BasePart") then
+						if YardHaxxAPI_Bools.Noclip then
+							x.CanCollide = false
+						elseif not YardHaxxAPI_Bools.Noclip then
+							if x.Name == "Torso" then
+								x.CanCollide = true
+							end
+						end
+					end
+				end
+			end)
+			task.spawn(function()
+				char['Humanoid'].WalkSpeed = YardHaxxAPI_Numbers.WS;
+				char['Humanoid'].JumpPower = YardHaxxAPI_Numbers.JP;
+			end)
+		end
+	end)
+end)
+
+task.spawn(function()
+	while true do
+		if YardHaxxAPI_Bools.ESP then
+			for _, v in pairs(Players:GetPlayers()) do
+				if v ~= LocalPlayer and v.Character then
+					local existing = v.Character:FindFirstChild("Highlight")
+					if not existing then
+						local highlight = Instance.new("Highlight")
+						highlight.Name = "Highlight"
+						highlight.FillColor = v.TeamColor.Color
+						highlight.Enabled = true
+						highlight.Parent = v.Character
+					else
+						existing.FillColor = v.TeamColor.Color
+						existing.Enabled = true
+					end
+				end
+			end
+		else
+			for _, v in pairs(Players:GetPlayers()) do
+				if v ~= LocalPlayer and v.Character then
+					local h = v.Character:FindFirstChild("Highlight")
+					if h then
+						h:Destroy()
+					end
+				end
+			end
+		end
+		task.wait(0.2)
+	end
+end)
+
+return YardHaxxAPI
